@@ -1,0 +1,39 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start SiAdu PHP server",
+      "type": "process",
+      "command": "C:\\xampp\\php\\php.exe",
+      "args": [
+        "-S",
+        "127.0.0.1:8000",
+        "-t",
+        "${workspaceFolder}"
+      ],
+      "isBackground": true,
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false
+      },
+      "problemMatcher": {
+        "owner": "php-server",
+        "pattern": {
+          "regexp": "^.*PHP (?:Fatal error|Parse error): (.*) in (.*) on line (\\d+)$",
+          "message": 1,
+          "file": 2,
+          "line": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Development Server \\(http://127\\.0\\.0\\.1:8000\\) started",
+          "endsPattern": "Development Server \\(http://127\\.0\\.0\\.1:8000\\) started"
+        }
+      }
+    }
+  ]
+}
