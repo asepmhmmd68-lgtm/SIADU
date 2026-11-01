@@ -1,190 +1,157 @@
 <?php
-require __DIR__ . '/config.php';
+require __DIR__ . '/auth.php';
+$staff = requireStaff();
+$conn = getDbConnection();
+$isAdmin = $staff['peran'] === 'admin';
+$opdId = (int)($staff['id_opd'] ?? 0);
 
-try {
-    $conn = getDbConnection();
-} catch (Exception $e) {
-    die($e->getMessage());
+if ($isAdmin) {
+    $statsQuery = $conn->query("SELECT COUNT(*) AS total,
+        SUM(status = 'selesai') AS selesai,
+        SUM(status IN ('diterima', 'diverifikasi', 'diproses')) AS diproses
+        FROM pengaduan");
+    $listQuery = $conn->query("SELECT p.no_tiket, p.judul, p.lokasi, p.status, p.tgl_masuk,
+        k.nama_kategori, o.nama_opd, u.nama AS nama_pelapor
+        FROM pengaduan p
+        JOIN kategori k ON k.id_kategori = p.id_kategori
+        JOIN perangkat_daerah o ON o.id_opd = p.id_opd
+        LEFT JOIN pengguna u ON u.id_pengguna = p.id_pengguna
+        ORDER BY p.tgl_masuk DESC");
+} else {
+    $statsStatement = $conn->prepare("SELECT COUNT(*) AS total,
+        SUM(status = 'selesai') AS selesai,
+        SUM(status IN ('diterima', 'diverifikasi', 'diproses')) AS diproses
+        FROM pengaduan WHERE id_opd = ?");
+    $statsStatement->bind_param('i', $opdId);
+    $statsStatement->execute();
+    $statsQuery = $statsStatement->get_result();
+
+    $listStatement = $conn->prepare("SELECT p.no_tiket, p.judul, p.lokasi, p.status, p.tgl_masuk,
+        k.nama_kategori, o.nama_opd, u.nama AS nama_pelapor
+        FROM pengaduan p
+        JOIN kategori k ON k.id_kategori = p.id_kategori
+        JOIN perangkat_daerah o ON o.id_opd = p.id_opd
+        LEFT JOIN pengguna u ON u.id_pengguna = p.id_pengguna
+        WHERE p.id_opd = ? ORDER BY p.tgl_masuk DESC");
+    $listStatement->bind_param('i', $opdId);
+    $listStatement->execute();
+    $listQuery = $listStatement->get_result();
 }
-
-$stats = $conn->query("SELECT
-    COUNT(*) AS total,
-    SUM(CASE WHEN stage_idx = 3 THEN 1 ELSE 0 END) AS selesai,
-    SUM(CASE WHEN stage_idx BETWEEN 1 AND 2 THEN 1 ELSE 0 END) AS diproses
-FROM pengaduan");
-$statsData = $stats && $stats->num_rows ? $stats->fetch_assoc() : ['total' => 0, 'selesai' => 0, 'diproses' => 0];
-
-$list = $conn->query("SELECT * FROM pengaduan ORDER BY created_at DESC");
-
-function getStatusLabel(int $stageIdx): string {
-    $labels = ['Diterima', 'Diverifikasi', 'Sedang dikerjakan', 'Selesai'];
-    return $labels[max(0, min($stageIdx, count($labels) - 1))];
-}
+$stats = $statsQuery->fetch_assoc() ?: ['total' => 0, 'selesai' => 0, 'diproses' => 0];
+$complaints = $listQuery->fetch_all(MYSQLI_ASSOC);
+$statusLabels = [
+    'diterima' => 'Diterima',
+    'diverifikasi' => 'Diverifikasi',
+    'diproses' => 'Sedang dikerjakan',
+    'selesai' => 'Selesai',
+    'ditolak' => 'Ditolak'
+];
 ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard SiAdu</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard Petugas — SiAdu</title>
     <style>
-        :root {
-            --navy: #14304D;
-            --navy-2: #1F4A73;
-            --gold: #B9832A;
-            --bg: #F4F7FB;
-            --surface: #FFFFFF;
-            --text: #1F2A37;
-            --muted: #64748B;
-            --border: #E2E8F0;
-            --success: #1F7A4D;
-            --warning: #B9832A;
-        }
-        * { box-sizing: border-box; }
-        body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-        }
-        .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
-        .topbar {
-            background: var(--navy);
-            color: #fff;
-            padding: 18px 0;
-        }
-        .topbar-inner {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 24px;
-        }
-        h1 { margin: 0; font-size: 28px; }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(180px, 1fr));
-            gap: 16px;
-            margin: 28px 0;
-        }
-        .card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 20px;
-            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
-        }
-        .number {
-            font-size: 32px;
-            font-weight: 700;
-            color: var(--navy-2);
-            margin-bottom: 6px;
-        }
-        .label { color: var(--muted); font-size: 14px; }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            overflow: hidden;
-        }
-        th, td {
-            text-align: left;
-            padding: 12px 14px;
-            border-bottom: 1px solid var(--border);
-            vertical-align: top;
-        }
-        th {
-            background: var(--navy);
-            color: #fff;
-            font-size: 13px;
-            text-transform: uppercase;
-        }
-        tbody tr:hover { background: #F8FAFC; }
-        .badge {
-            display: inline-block;
-            padding: 6px 10px;
-            border-radius: 999px;
-            font-size: 12px;
-            font-weight: 600;
-            background: #E7F3EC;
-            color: var(--success);
-        }
-        .badge.warn {
-            background: #F1E4CC;
-            color: var(--warning);
-        }
-        .muted { color: var(--muted); }
-        a { color: var(--navy-2); text-decoration: none; }
+        :root{--navy:#14304d;--blue:#1f4a73;--bg:#f4f7fb;--border:#e2e8f0;--muted:#64748b}
+        *{box-sizing:border-box}body{margin:0;font:15px Arial,sans-serif;background:var(--bg);color:#1f2a37}
+        header{background:var(--navy);color:#fff;padding:18px 24px;display:flex;justify-content:space-between;align-items:center}
+        header h1{font-size:22px;margin:0}header a{color:#fff}form.inline{display:inline}
+        button{cursor:pointer}header button{background:transparent;color:#fff;border:1px solid #fff;border-radius:6px;padding:8px 12px}
+        main{max-width:1200px;margin:28px auto;padding:0 20px}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:22px}
+        .card{background:#fff;border:1px solid var(--border);border-radius:10px;padding:18px}.number{font-size:28px;font-weight:bold;color:var(--blue)}
+        .label{margin-top:5px;color:var(--muted)}.table-wrap{overflow:auto;background:#fff;border:1px solid var(--border);border-radius:10px}
+        table{width:100%;border-collapse:collapse;min-width:950px}th,td{text-align:left;padding:12px;border-bottom:1px solid var(--border);vertical-align:top}
+        th{background:var(--navy);color:#fff;font-size:12px;text-transform:uppercase}td small{display:block;color:var(--muted);margin-top:4px}
+        select,input{padding:8px;border:1px solid #cbd5e1;border-radius:6px;max-width:180px}td button{padding:8px 10px;background:var(--blue);color:#fff;border:0;border-radius:6px}
+        .message{margin:0 0 16px;padding:12px;border-radius:8px;display:none}.message.error{display:block;background:#fff0ee;color:#8b2e24}
+        .message.success{display:block;background:#e7f3ec;color:#1f7a4d}
+        @media(max-width:650px){header{align-items:flex-start;gap:12px}.stats{grid-template-columns:1fr}}
     </style>
 </head>
 <body>
-    <div class="topbar">
-        <div class="topbar-inner">
-            <h1>Dashboard SiAdu</h1>
-            <a href="index.php">Lihat website utama</a>
-        </div>
+<header>
+    <div>
+        <h1>Dashboard SiAdu</h1>
+        <small><?= escapeHtml($staff['nama']) ?><?= $isAdmin ? ' — Admin' : ' — Petugas OPD' ?></small>
     </div>
-
-    <div class="wrap">
-        <div class="stats">
-            <div class="card">
-                <div class="number">
-                    <?= (int)($statsData['total'] ?? 0) ?>
-                </div>
-                <div class="label">Total aduan</div>
-            </div>
-            <div class="card">
-                <div class="number">
-                    <?= (int)($statsData['diproses'] ?? 0) ?>
-                </div>
-                <div class="label">Sedang diproses</div>
-            </div>
-            <div class="card">
-                <div class="number">
-                    <?= (int)($statsData['selesai'] ?? 0) ?>
-                </div>
-                <div class="label">Selesai</div>
-            </div>
-        </div>
-
-        <div class="card" style="padding:0; overflow:hidden;">
-            <table>
-                <thead>
-                    <tr>
-                        <th>No. Tiket</th>
-                        <th>Kategori</th>
-                        <th>Lokasi</th>
-                        <th>Dinas</th>
-                        <th>Status</th>
-                        <th>Waktu</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if ($list && $list->num_rows > 0): ?>
-                        <?php while ($row = $list->fetch_assoc()): ?>
-                            <?php $stageIdx = (int)($row['stage_idx'] ?? 0); ?>
-                            <tr>
-                                <td><strong><?= htmlspecialchars($row['nomor_tiket']) ?></strong></td>
-                                <td><?= htmlspecialchars($row['kategori_nama']) ?></td>
-                                <td><?= htmlspecialchars($row['lokasi']) ?></td>
-                                <td><?= htmlspecialchars($row['dinas']) ?></td>
-                                <td>
-                                    <span class="badge <?= $stageIdx >= 3 ? '' : 'warn' ?>"><?= getStatusLabel($stageIdx) ?></span>
-                                </td>
-                                <td class="muted"><?= htmlspecialchars($row['created_at']) ?></td>
-                            </tr>
-                        <?php endwhile; ?>
-                    <?php else: ?>
-                        <tr>
-                            <td colspan="6" style="padding: 20px; color: var(--muted);">Belum ada aduan masuk.</td>
-                        </tr>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
+    <div>
+        <a href="index.php">Beranda</a>
+        <form class="inline" method="post" action="logout.php">
+            <input type="hidden" name="csrf_token" value="<?= escapeHtml(csrfToken()) ?>">
+            <button type="submit">Keluar</button>
+        </form>
     </div>
+</header>
+<main>
+    <div class="stats">
+        <div class="card"><div class="number"><?= (int)($stats['total'] ?? 0) ?></div><div class="label">Total aduan</div></div>
+        <div class="card"><div class="number"><?= (int)($stats['diproses'] ?? 0) ?></div><div class="label">Belum selesai</div></div>
+        <div class="card"><div class="number"><?= (int)($stats['selesai'] ?? 0) ?></div><div class="label">Selesai</div></div>
+    </div>
+    <div id="message" class="message" role="status"></div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr>
+                <th>Tiket / pelapor</th><th>Aduan</th><th>OPD</th><th>Status</th><th>Masuk</th><th>Perbarui status</th>
+            </tr></thead>
+            <tbody>
+            <?php if (!$complaints): ?>
+                <tr><td colspan="6">Belum ada aduan untuk ditampilkan.</td></tr>
+            <?php else: foreach ($complaints as $complaint): ?>
+                <tr>
+                    <td><strong><?= escapeHtml($complaint['no_tiket']) ?></strong><small><?= escapeHtml($complaint['nama_pelapor'] ?? 'Akun lama') ?></small></td>
+                    <td><strong><?= escapeHtml($complaint['judul']) ?></strong><small><?= escapeHtml($complaint['nama_kategori']) ?> · <?= escapeHtml($complaint['lokasi']) ?></small></td>
+                    <td><?= escapeHtml($complaint['nama_opd']) ?></td>
+                    <td><?= escapeHtml($statusLabels[$complaint['status']] ?? $complaint['status']) ?></td>
+                    <td><?= escapeHtml($complaint['tgl_masuk']) ?></td>
+                    <td>
+                        <form class="status-form">
+                            <input type="hidden" name="no_tiket" value="<?= escapeHtml($complaint['no_tiket']) ?>">
+                            <select name="status" aria-label="Status baru">
+                                <?php foreach ($statusLabels as $key => $label): ?>
+                                    <option value="<?= escapeHtml($key) ?>" <?= $key === $complaint['status'] ? 'selected' : '' ?>><?= escapeHtml($label) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <input name="catatan" type="text" maxlength="2000" placeholder="Catatan (opsional)" aria-label="Catatan">
+                            <button type="submit">Simpan</button>
+                        </form>
+                    </td>
+                </tr>
+            <?php endforeach; endif; ?>
+            </tbody>
+        </table>
+    </div>
+</main>
+<script>
+const CSRF_TOKEN = <?= json_encode(csrfToken()) ?>;
+document.querySelectorAll('.status-form').forEach(form => {
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const message = document.getElementById('message');
+        const button = form.querySelector('button');
+        button.disabled = true;
+        try {
+            const response = await fetch('api.php?action=ubah_status', {
+                method: 'POST',
+                headers: {'X-CSRF-Token': CSRF_TOKEN},
+                body: new FormData(form)
+            });
+            const result = await response.json();
+            if (!response.ok || result.status !== 'success') {
+                throw new Error(result.message || 'Status gagal diperbarui.');
+            }
+            message.className = 'message success';
+            message.textContent = 'Status aduan berhasil diperbarui.';
+            window.location.reload();
+        } catch (error) {
+            message.className = 'message error';
+            message.textContent = error.message || 'Terjadi kesalahan saat memperbarui status.';
+            button.disabled = false;
+        }
+    });
+});
+</script>
 </body>
 </html>

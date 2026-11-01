@@ -1,19 +1,35 @@
 <?php
-require __DIR__ . '/config.php';
+require __DIR__ . '/auth.php';
 
 try {
     $conn = getDbConnection();
 } catch (Exception $e) {
-    die($e->getMessage());
+    error_log('Homepage database error: ' . $e->getMessage());
+    http_response_code(500);
+    exit('Layanan belum dapat dibuka. Silakan coba kembali nanti.');
 }
 
+$user = currentUser();
 $total_bulan_ini = 0;
-$bulan_ini = date('Y-m');
-$stat_query = $conn->query("SELECT COUNT(*) AS total FROM pengaduan WHERE DATE_FORMAT(created_at, '%Y-%m') = '$bulan_ini'");
+$stat_query = $conn->query("SELECT COUNT(*) AS total FROM pengaduan WHERE YEAR(tgl_masuk) = YEAR(CURRENT_DATE()) AND MONTH(tgl_masuk) = MONTH(CURRENT_DATE())");
 if ($stat_query) {
     $stat_data = $stat_query->fetch_assoc();
     $total_bulan_ini = (int)($stat_data['total'] ?? 0);
 }
+$resolvedPercent = 0;
+$resolvedQuery = $conn->query("SELECT COUNT(*) AS total, SUM(status = 'selesai') AS selesai FROM pengaduan");
+if ($resolvedQuery && ($resolvedData = $resolvedQuery->fetch_assoc()) && (int)$resolvedData['total'] > 0) {
+    $resolvedPercent = (int)round(((int)$resolvedData['selesai'] / (int)$resolvedData['total']) * 100);
+}
+$averageDays = '—';
+$averageQuery = $conn->query("SELECT AVG(TIMESTAMPDIFF(HOUR, tgl_masuk, tgl_selesai)) / 24 AS hari FROM pengaduan WHERE tgl_selesai IS NOT NULL");
+if ($averageQuery && ($averageData = $averageQuery->fetch_assoc()) && $averageData['hari'] !== null) {
+    $averageDays = number_format((float)$averageData['hari'], 1, ',', '.') . ' hari';
+}
+$categoriesQuery = $conn->query("SELECT k.id_kategori, k.kategori_key, k.nama_kategori, o.nama_opd
+    FROM kategori k JOIN perangkat_daerah o ON o.id_opd = k.id_opd_default
+    ORDER BY k.id_kategori");
+$categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -162,9 +178,24 @@ if ($stat_query) {
       <a href="#alur">Alur pengaduan</a>
       <a href="#statistik">Statistik</a>
     </nav>
-    <button class="btn-outline-light" onclick="document.getElementById('nomorTiket').focus()">
-      <i class="ti ti-ticket" aria-hidden="true" style="vertical-align:-2px;margin-right:6px;"></i>Lacak tiket
-    </button>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button class="btn-outline-light" onclick="document.getElementById('nomorTiket').focus()">
+        <i class="ti ti-ticket" aria-hidden="true" style="vertical-align:-2px;margin-right:6px;"></i>Lacak tiket
+      </button>
+      <?php if ($user): ?>
+        <?php if (in_array($user['peran'], ['petugas', 'admin'], true)): ?>
+          <a class="btn-outline-light" href="admin.php">Dashboard</a>
+        <?php else: ?>
+          <a class="btn-outline-light" href="aduan_saya.php">Aduan saya</a>
+        <?php endif; ?>
+        <form method="post" action="logout.php" style="margin:0;">
+          <input type="hidden" name="csrf_token" value="<?= escapeHtml(csrfToken()) ?>">
+          <button class="btn-outline-light" type="submit">Keluar</button>
+        </form>
+      <?php else: ?>
+        <a class="btn-outline-light" href="login.php">Masuk</a>
+      <?php endif; ?>
+    </div>
   </div>
 </header>
 
@@ -175,7 +206,7 @@ if ($stat_query) {
       <h1 class="hero-title">Laporkan masalah di sekitar anda, pantau sampai selesai.</h1>
       <p class="hero-sub">Ajukan aduan dalam hitungan menit. Setiap laporan diteruskan langsung ke dinas terkait dan bisa anda pantau kapan saja tanpa perlu datang ke kantor.</p>
       <div class="hero-ctas">
-        <button type="button" class="btn-gold" onclick="openFormModal()"><i class="ti ti-pencil-plus" aria-hidden="true"></i>Ajukan aduan baru</button>
+        <button type="button" class="btn-gold" onclick="<?= $user && $user['peran'] === 'warga' ? 'openFormModal()' : "window.location.href='login.php'" ?>"><i class="ti ti-pencil-plus" aria-hidden="true"></i>Ajukan aduan baru</button>
         <button type="button" class="btn-ghost-light" onclick="document.getElementById('alur').scrollIntoView()">Lihat cara kerja</button>
       </div>
     </div>
@@ -229,8 +260,8 @@ if ($stat_query) {
     </div>
     <div class="stats-grid">
       <div class="stat-card"><div class="num" id="statTotal"><?= number_format($total_bulan_ini, 0, ',', '.') ?></div><div class="lbl">Total aduan diterima bulan ini</div></div>
-      <div class="stat-card"><div class="num">89%</div><div class="lbl">Aduan terselesaikan tepat waktu</div></div>
-      <div class="stat-card"><div class="num">2,4 hari</div><div class="lbl">Rata-rata waktu penyelesaian</div></div>
+      <div class="stat-card"><div class="num"><?= $resolvedPercent ?>%</div><div class="lbl">Aduan telah terselesaikan</div></div>
+      <div class="stat-card"><div class="num"><?= escapeHtml($averageDays) ?></div><div class="lbl">Rata-rata waktu penyelesaian</div></div>
     </div>
   </div>
 </section>
@@ -266,13 +297,15 @@ if ($stat_query) {
     <div class="field">
       <label for="fKategori">Kategori aduan</label>
       <select id="fKategori">
-        <option value="jalan">Jalan & jembatan rusak</option>
-        <option value="sampah">Kebersihan & sampah</option>
-        <option value="lampu">Lampu jalan mati</option>
-        <option value="banjir">Banjir & drainase</option>
-        <option value="fasum">Fasilitas umum rusak</option>
-        <option value="lain">Lainnya</option>
+        <?php foreach ($categories as $category): ?>
+          <option value="<?= (int)$category['id_kategori'] ?>"><?= escapeHtml($category['nama_kategori']) ?></option>
+        <?php endforeach; ?>
       </select>
+    </div>
+
+    <div class="field">
+      <label for="fJudul">Judul aduan</label>
+      <input type="text" id="fJudul" maxlength="180" placeholder="Ringkas masalah yang dilaporkan">
     </div>
     
     <div class="field">
@@ -287,7 +320,7 @@ if ($stat_query) {
     
     <div class="field">
       <label for="fFoto">Foto Pendukung (Opsional)</label>
-      <input type="file" id="fFoto" accept="image/*">
+      <input type="file" id="fFoto" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
     </div>
 
     <div class="modal-actions">
@@ -314,21 +347,14 @@ if ($stat_query) {
 </div>
 
 <script>
-  const KATEGORI = [
-    { key: "jalan", nama: "Jalan & jembatan rusak", icon: "ti-road", dinas: "Dinas Pekerjaan Umum", desc: "Jalan berlubang, jembatan retak, marka pudar." },
-    { key: "sampah", nama: "Kebersihan & sampah", icon: "ti-trash", dinas: "Dinas Lingkungan Hidup", desc: "Tumpukan sampah, TPS penuh, bau tak sedap." },
-    { key: "lampu", nama: "Lampu jalan mati", icon: "ti-bulb-off", dinas: "Dinas Perhubungan", desc: "Penerangan jalan umum tidak menyala." },
-    { key: "banjir", nama: "Banjir & drainase", icon: "ti-droplet", dinas: "Dinas Pekerjaan Umum", desc: "Saluran air tersumbat, genangan, banjir." },
-    { key: "fasum", nama: "Fasilitas umum rusak", icon: "ti-building-community", dinas: "Dinas Lingkungan Hidup", desc: "Taman, halte, trotoar, fasilitas publik lain." },
-    { key: "lain", nama: "Lainnya", icon: "ti-dots", dinas: "Sekretariat Daerah", desc: "Masalah lain yang tidak masuk kategori di atas." }
-  ];
-
-  const STAGES = [
-    { key: "diterima", label: "Aduan diterima", pct: 25 },
-    { key: "diverifikasi", label: "Diverifikasi petugas", pct: 50 },
-    { key: "dikerjakan", label: "Sedang dikerjakan", pct: 75 },
-    { key: "selesai", label: "Selesai", pct: 100 }
-  ];
+  const KATEGORI = <?= json_encode($categories, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+  const IS_WARGA = <?= json_encode($user && $user['peran'] === 'warga') ?>;
+  const CSRF_TOKEN = <?= json_encode(csrfToken()) ?>;
+  const STATUS_PROGRESS = { diterima: 25, diverifikasi: 50, diproses: 75, selesai: 100, ditolak: 100 };
+  const CATEGORY_ICONS = { jalan: 'ti-road', sampah: 'ti-trash', lampu: 'ti-bulb-off', banjir: 'ti-droplet', fasum: 'ti-building-community', lain: 'ti-dots' };
+  const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+  }[char]));
 
   let currentTicket = null;
 
@@ -336,21 +362,26 @@ if ($stat_query) {
     const grid = document.getElementById('catGrid');
     if (!grid) return;
     grid.innerHTML = KATEGORI.map(k => `
-      <button type="button" class="cat-card" onclick="openFormModal('${k.key}')">
-        <div class="icon"><i class="ti ${k.icon}" aria-hidden="true"></i></div>
-        <h4>${k.nama}</h4>
-        <p>${k.desc}</p>
+      <button type="button" class="cat-card" onclick="${IS_WARGA ? `openFormModal(${Number(k.id_kategori)})` : "window.location.href='login.php'"}">
+        <div class="icon"><i class="ti ${CATEGORY_ICONS[k.kategori_key] || 'ti-message-circle'}" aria-hidden="true"></i></div>
+        <h4>${escapeHtml(k.nama_kategori)}</h4>
+        <p>${escapeHtml(k.nama_opd)}</p>
       </button>
     `).join('');
   }
 
-  function openFormModal(kategoriKey) {
+  function openFormModal(kategoriId) {
+    if (!IS_WARGA) {
+      window.location.href = 'login.php';
+      return;
+    }
     const overlay = document.getElementById('formOverlay');
     if (overlay) overlay.classList.add('open');
     
     const sel = document.getElementById('fKategori');
-    if (sel) sel.value = kategoriKey || "jalan";
+    if (sel && kategoriId) sel.value = String(kategoriId);
     
+    if (document.getElementById('fJudul')) document.getElementById('fJudul').value = '';
     if (document.getElementById('fLokasi')) document.getElementById('fLokasi').value = '';
     if (document.getElementById('fDeskripsi')) document.getElementById('fDeskripsi').value = '';
     if (document.getElementById('fFoto')) document.getElementById('fFoto').value = '';
@@ -362,21 +393,20 @@ if ($stat_query) {
   }
 
   async function kirimAduan() {
-    const kategoriKey = document.getElementById('fKategori').value;
-    const kategori = KATEGORI.find(k => k.key === kategoriKey) || KATEGORI[0];
+    const kategoriId = document.getElementById('fKategori').value;
+    const judul = document.getElementById('fJudul').value.trim();
     const lokasi = document.getElementById('fLokasi').value.trim();
     const deskripsi = document.getElementById('fDeskripsi').value.trim();
     const fotoFile = document.getElementById('fFoto').files[0];
 
-    if (!lokasi || !deskripsi) {
-      alert('Harap isi lokasi dan deskripsi aduan!');
+    if (!judul || !lokasi || !deskripsi) {
+      alert('Harap isi judul, lokasi, dan deskripsi aduan!');
       return;
     }
 
     const formData = new FormData();
-    formData.append('kategori_key', kategori.key);
-    formData.append('kategori_nama', kategori.nama);
-    formData.append('dinas', kategori.dinas);
+    formData.append('id_kategori', kategoriId);
+    formData.append('judul', judul);
     formData.append('lokasi', lokasi);
     formData.append('deskripsi', deskripsi);
     if (fotoFile) {
@@ -386,6 +416,7 @@ if ($stat_query) {
     try {
       const res = await fetch('api.php?action=kirim', {
         method: 'POST',
+        headers: {'X-CSRF-Token': CSRF_TOKEN},
         body: formData
       });
 
@@ -393,8 +424,8 @@ if ($stat_query) {
 
       if (data.status === 'success') {
         closeModal('formOverlay');
-        document.getElementById('hasilTiketNomor').textContent = data.nomor_tiket;
-        currentTicket = data.nomor_tiket;
+        document.getElementById('hasilTiketNomor').textContent = data.no_tiket;
+        currentTicket = data.no_tiket;
         document.getElementById('ticketOverlay').classList.add('open');
       } else {
         alert(data.message || 'Gagal mengirim aduan.');
@@ -415,67 +446,55 @@ if ($stat_query) {
     }
 
     try {
-      const res = await fetch(`api.php?action=lacak&nomor_tiket=${encodeURIComponent(no)}`);
+      const res = await fetch(`api.php?action=lacak&no_tiket=${encodeURIComponent(no)}`);
       const data = await res.json();
 
       if (data.status === 'success') {
         const item = data.data;
-        const stage = STAGES[item.stage_idx] || STAGES[0];
-        const isDone = item.stage_idx >= STAGES.length - 1;
+        const isDone = item.status === 'selesai' || item.status === 'ditolak';
+        const history = (item.riwayat || []).map(entry => `
+          <div class="row"><span class="label">${escapeHtml(entry.waktu)}</span>
+          <span class="val">${escapeHtml(entry.status_label)}${entry.catatan ? `<br>${escapeHtml(entry.catatan)}` : ''}</span></div>
+        `).join('');
+        const attachments = (item.lampiran || []).map(path => `
+          <div class="row"><span class="label">Lampiran:</span>
+          <span class="val"><a href="${escapeHtml(path)}" target="_blank" rel="noopener">Lihat berkas</a></span></div>
+        `).join('');
 
         statusArea.innerHTML = `
           <div class="status-preview">
             <div class="row">
               <span class="label">Kategori:</span>
-              <span class="val"><strong>${item.kategori_nama}</strong></span>
+              <span class="val"><strong>${escapeHtml(item.nama_kategori)}</strong></span>
             </div>
             <div class="row">
               <span class="label">Penanggung Jawab:</span>
-              <span class="val">${item.dinas}</span>
+              <span class="val">${escapeHtml(item.nama_opd)}</span>
             </div>
+            ${item.judul ? `<div class="row">
+              <span class="label">Aduan:</span>
+              <span class="val">${escapeHtml(item.judul)}</span>
+            </div>` : ''}
             <div class="row">
               <span class="label">Status:</span>
               <span class="val">
-                <span class="pill ${isDone ? 'success' : 'warn'}">${stage.label}</span>
+                <span class="pill ${isDone ? 'success' : 'warn'}">${escapeHtml(item.status_label)}</span>
               </span>
             </div>
-            ${item.foto ? `
-            <div class="row" style="margin-top: 10px;">
-              <span class="label">Foto Aduan:</span>
-              <span class="val"><a href="${item.foto}" target="_blank" style="color:var(--navy-2);font-weight:600;">Lihat Foto</a></span>
-            </div>` : ''}
+            ${attachments}
             <div class="bar-track">
-              <div class="bar-fill" style="width: ${stage.pct}%"></div>
+              <div class="bar-fill" style="width: ${STATUS_PROGRESS[item.status] || 0}%"></div>
             </div>
-            ${!isDone ? `<button class="sim-btn" onclick="simulasiProgres('${item.nomor_tiket}')">Simulasi Progres Penanganan</button>` : ''}
+            <h4>Riwayat status</h4>
+            ${history || '<p class="empty-note">Belum ada riwayat status.</p>'}
           </div>
         `;
       } else {
-        statusArea.innerHTML = `<p class="empty-note">${data.message || 'Nomor tiket tidak ditemukan.'}</p>`;
+        statusArea.innerHTML = `<p class="empty-note">${escapeHtml(data.message || 'Nomor tiket tidak ditemukan.')}</p>`;
       }
     } catch (e) {
       console.error(e);
       statusArea.innerHTML = '<p class="empty-note">Gagal mengambil data dari server.</p>';
-    }
-  }
-
-  async function simulasiProgres(nomorTiket) {
-    try {
-      const res = await fetch('api.php?action=simulasi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nomor_tiket: nomorTiket })
-      });
-      const data = await res.json();
-
-      if (data.status === 'success') {
-        cariTiket();
-      } else {
-        alert(data.message);
-      }
-    } catch (e) {
-      console.error(e);
-      alert('Gagal mengupdate status.');
     }
   }
 
@@ -489,6 +508,11 @@ if ($stat_query) {
 
   document.addEventListener('DOMContentLoaded', () => {
     renderCategories();
+    const ticketFromLink = new URLSearchParams(window.location.search).get('no_tiket');
+    if (ticketFromLink) {
+      document.getElementById('nomorTiket').value = ticketFromLink;
+      cariTiket();
+    }
   });
 </script>
 

@@ -1,12 +1,5 @@
 <?php
-$host     = "localhost";
-$user     = "root";
-$pass     = "";
-$database = "db_siadu_desa";
+require_once dirname(__DIR__) . '/config.php';
 
-$koneksi = mysqli_connect($host, $user, $pass, $database);
-
-if (!$koneksi) {
-    die("Koneksi ke database gagal: " . mysqli_connect_error());
-}
+$koneksi = getDbConnection();
 ?>
