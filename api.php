@@ -196,6 +196,105 @@ function trackComplaint(mysqli $conn): void
     respond(['status' => 'success', 'data' => $complaint]);
 }
 
+function dashboardProgress(mysqli $conn): void
+{
+    $user = currentUser();
+    if (!$user || !in_array($user['peran'], ['petugas', 'admin'], true)) {
+        failRequest('Akses hanya untuk petugas.', 403);
+        return;
+    }
+
+    $isAdmin = $user['peran'] === 'admin';
+    $opdId = (int)($user['id_opd'] ?? 0);
+    if ($isAdmin) {
+        $statusQuery = $conn->query('SELECT status, COUNT(*) AS jumlah FROM pengaduan GROUP BY status');
+        $progressQuery = $conn->query("SELECT o.nama_opd, COUNT(p.id_pengaduan) AS total,
+            COALESCE(SUM(p.status IN ('diterima', 'diverifikasi', 'diproses')), 0) AS diproses,
+            COALESCE(SUM(p.status = 'selesai'), 0) AS selesai,
+            COALESCE(SUM(p.status = 'ditolak'), 0) AS ditolak
+            FROM perangkat_daerah o
+            LEFT JOIN pengaduan p ON p.id_opd = o.id_opd
+            GROUP BY o.id_opd, o.nama_opd
+            ORDER BY o.nama_opd");
+    } else {
+        $statusStatement = $conn->prepare('SELECT status, COUNT(*) AS jumlah FROM pengaduan WHERE id_opd = ? GROUP BY status');
+        $statusStatement->bind_param('i', $opdId);
+        $statusStatement->execute();
+        $statusQuery = $statusStatement->get_result();
+
+        $progressStatement = $conn->prepare("SELECT o.nama_opd, COUNT(p.id_pengaduan) AS total,
+            COALESCE(SUM(p.status IN ('diterima', 'diverifikasi', 'diproses')), 0) AS diproses,
+            COALESCE(SUM(p.status = 'selesai'), 0) AS selesai,
+            COALESCE(SUM(p.status = 'ditolak'), 0) AS ditolak
+            FROM perangkat_daerah o
+            LEFT JOIN pengaduan p ON p.id_opd = o.id_opd
+            WHERE o.id_opd = ?
+            GROUP BY o.id_opd, o.nama_opd");
+        $progressStatement->bind_param('i', $opdId);
+        $progressStatement->execute();
+        $progressQuery = $progressStatement->get_result();
+    }
+
+    $statuses = ['diterima' => 0, 'diverifikasi' => 0, 'diproses' => 0, 'selesai' => 0, 'ditolak' => 0];
+    while ($row = $statusQuery->fetch_assoc()) {
+        if (array_key_exists($row['status'], $statuses)) {
+            $statuses[$row['status']] = (int)$row['jumlah'];
+        }
+    }
+
+    $periodEndQuery = $conn->query('SELECT CURRENT_DATE AS period_end');
+    $periodEnd = $periodEndQuery->fetch_assoc()['period_end'];
+    $opdFilter = $isAdmin ? '' : ' AND id_opd = ?';
+    $trendQueries = [
+        'daily' => "SELECT DATE_FORMAT(tgl_masuk, '%Y-%m-%d') AS periode, COUNT(*) AS jumlah
+            FROM pengaduan
+            WHERE tgl_masuk >= DATE_SUB(CURRENT_DATE, INTERVAL 13 DAY)
+                AND tgl_masuk < DATE_ADD(CURRENT_DATE, INTERVAL 1 DAY)
+                $opdFilter
+            GROUP BY DATE(tgl_masuk) ORDER BY DATE(tgl_masuk)",
+        'monthly' => "SELECT DATE_FORMAT(tgl_masuk, '%Y-%m') AS periode, COUNT(*) AS jumlah
+            FROM pengaduan
+            WHERE tgl_masuk >= DATE_FORMAT(DATE_SUB(CURRENT_DATE, INTERVAL 11 MONTH), '%Y-%m-01')
+                AND tgl_masuk < DATE_ADD(LAST_DAY(CURRENT_DATE), INTERVAL 1 DAY)
+                $opdFilter
+            GROUP BY YEAR(tgl_masuk), MONTH(tgl_masuk) ORDER BY YEAR(tgl_masuk), MONTH(tgl_masuk)",
+        'yearly' => "SELECT YEAR(tgl_masuk) AS periode, COUNT(*) AS jumlah
+            FROM pengaduan
+            WHERE YEAR(tgl_masuk) >= YEAR(CURRENT_DATE) - 4
+                AND tgl_masuk < DATE_ADD(CURRENT_DATE, INTERVAL 1 DAY)
+                $opdFilter
+            GROUP BY YEAR(tgl_masuk) ORDER BY YEAR(tgl_masuk)"
+    ];
+    $trends = [];
+    foreach ($trendQueries as $period => $sql) {
+        $trendStatement = $conn->prepare($sql);
+        if (!$isAdmin) {
+            $trendStatement->bind_param('i', $opdId);
+        }
+        $trendStatement->execute();
+        $rows = $trendStatement->get_result()->fetch_all(MYSQLI_ASSOC);
+        $trends[$period] = array_map(static function (array $row): array {
+            return ['periode' => (string)$row['periode'], 'jumlah' => (int)$row['jumlah']];
+        }, $rows);
+    }
+
+    $total = array_sum($statuses);
+    respond([
+        'status' => 'success',
+        'period_end' => $periodEnd,
+        'data' => [
+            'totals' => [
+                'total' => $total,
+                'diproses' => $statuses['diterima'] + $statuses['diverifikasi'] + $statuses['diproses'],
+                'selesai' => $statuses['selesai']
+            ],
+            'statuses' => $statuses,
+            'opd_progress' => $progressQuery->fetch_all(MYSQLI_ASSOC),
+            'trends' => $trends
+        ]
+    ]);
+}
+
 function updateComplaintStatus(mysqli $conn): void
 {
     $user = currentUser();
@@ -265,6 +364,8 @@ try {
         saveComplaint($conn);
     } elseif ($action === 'lacak' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         trackComplaint($conn);
+    } elseif ($action === 'dashboard_progress' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        dashboardProgress($conn);
     } elseif ($action === 'ubah_status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         updateComplaintStatus($conn);
     } else {
