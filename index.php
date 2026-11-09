@@ -115,6 +115,7 @@ $categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
   .cat-card .icon { width: 40px; height: 40px; border-radius: 9px; background: var(--gold-light); color: var(--gold); display: flex; align-items: center; justify-content: center; font-size: 19px; margin-bottom: 14px; }
   .cat-card h4 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
   .cat-card p { margin: 0; font-size: 13px; color: var(--text-secondary); }
+  .cat-action { display: block; margin-top: 12px; color: var(--navy-2); font-size: 12px; font-weight: 600; }
 
   .timeline-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 32px 28px; }
   .timeline { display: grid; grid-template-columns: repeat(4, 1fr); position: relative; }
@@ -128,6 +129,22 @@ $categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
   .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px; }
   .stat-card .num { font-size: 30px; font-weight: 700; color: var(--navy); letter-spacing: -0.5px; }
   .stat-card .lbl { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+
+  .help-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(240px, 0.8fr); gap: 20px; align-items: start; }
+  .faq-list { display: grid; gap: 10px; }
+  .faq-list details, .contact-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+  .faq-list summary { cursor: pointer; font-weight: 600; padding: 16px 18px; }
+  .faq-list details p { margin: 0; padding: 0 18px 16px; color: var(--text-secondary); font-size: 14px; }
+  .contact-card { padding: 20px; }
+  .contact-card h3 { margin: 0 0 8px; font-size: 17px; }
+  .contact-card p { margin: 0; color: var(--text-secondary); font-size: 14px; }
+  .guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .guide-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px; }
+  .guide-card h3 { margin: 0 0 10px; font-size: 17px; }
+  .guide-card p, .guide-card li { color: var(--text-secondary); font-size: 14px; }
+  .guide-card ul { margin: 0; padding-left: 20px; }
+  .guide-card li + li { margin-top: 8px; }
+  .notice-note { margin: 14px 0 0; padding: 12px; border-radius: 8px; background: var(--gold-light); color: var(--text-primary); font-size: 13px; }
 
   footer { background: var(--navy); color: #B9C6D4; padding: 40px 0 28px; margin-top: 8px; }
   .foot-grid { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 24px; font-size: 13px; }
@@ -156,6 +173,8 @@ $categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
 
   @media (max-width: 860px) {
     .hero-grid { grid-template-columns: 1fr; }
+    .help-grid { grid-template-columns: 1fr; }
+    .guide-grid { grid-template-columns: 1fr; }
     .cat-grid { grid-template-columns: repeat(2, 1fr); }
     .timeline { grid-template-columns: repeat(2, 1fr); row-gap: 28px; }
     .timeline::before { display: none; }
@@ -177,6 +196,7 @@ $categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
       <a href="#kategori">Kategori</a>
       <a href="#alur">Alur pengaduan</a>
       <a href="#statistik">Statistik</a>
+      <a href="#panduan">Panduan</a>
     </nav>
     <div style="display:flex;align-items:center;gap:10px;">
       <button class="btn-outline-light" onclick="document.getElementById('nomorTiket').focus()">
@@ -206,7 +226,7 @@ $categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
       <h1 class="hero-title">Laporkan masalah di sekitar anda, pantau sampai selesai.</h1>
       <p class="hero-sub">Ajukan aduan dalam hitungan menit. Setiap laporan diteruskan langsung ke dinas terkait dan bisa anda pantau kapan saja tanpa perlu datang ke kantor.</p>
       <div class="hero-ctas">
-        <button type="button" class="btn-gold" onclick="<?= $user && $user['peran'] === 'warga' ? 'openFormModal()' : "window.location.href='login.php'" ?>"><i class="ti ti-pencil-plus" aria-hidden="true"></i>Ajukan aduan baru</button>
+        <button type="button" class="btn-gold" onclick="openFormModal()"><i class="ti ti-pencil-plus" aria-hidden="true"></i>Ajukan aduan baru</button>
         <button type="button" class="btn-ghost-light" onclick="document.getElementById('alur').scrollIntoView()">Lihat cara kerja</button>
       </div>
     </div>
@@ -231,6 +251,7 @@ $categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
       <p>Klik salah satu kategori untuk langsung mengajukan aduan — setiap kategori otomatis diteruskan ke dinas yang menangani.</p>
     </div>
     <div class="cat-grid" id="catGrid"></div>
+    <p id="categoryNotice" class="empty-note" role="status" aria-live="polite" hidden></p>
   </div>
 </section>
 
@@ -266,6 +287,72 @@ $categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
   </div>
 </section>
 
+<section id="panduan">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="kicker">Panduan layanan</p>
+      <h2>Sampaikan laporan dengan jelas dan aman</h2>
+      <p>Informasi ini membantu petugas memahami masalah dan meneruskan laporan ke perangkat daerah yang sesuai.</p>
+    </div>
+    <div class="guide-grid">
+      <article class="guide-card">
+        <h3>Agar laporan mudah ditindaklanjuti</h3>
+        <ul>
+          <li>Pilih kategori yang paling sesuai dengan masalah.</li>
+          <li>Tulis lokasi secara spesifik, misalnya nama jalan, patokan, atau RT/RW.</li>
+          <li>Jelaskan kondisi yang terlihat dan kapan masalah terjadi.</li>
+          <li>Sertakan foto yang relevan bila tersedia. Foto bersifat opsional, berformat JPG, PNG, atau WebP, maksimal 5 MB.</li>
+          <li>Simpan nomor tiket setelah laporan berhasil dikirim untuk mengecek statusnya.</li>
+        </ul>
+      </article>
+      <article class="guide-card" id="privasi">
+        <h3>Penggunaan informasi dan privasi</h3>
+        <p>Informasi akun, isi laporan, lokasi, dan lampiran digunakan untuk menerima serta menindaklanjuti aduan. Laporan diteruskan ke perangkat daerah sesuai kategori yang dipilih.</p>
+        <p>Hindari mencantumkan kata sandi, nomor identitas, informasi keuangan, atau data pribadi orang lain yang tidak diperlukan. Unggah hanya foto yang relevan dengan masalah.</p>
+        <p class="notice-note">Pemberitahuan ini merupakan informasi dasar layanan, bukan pengganti kebijakan privasi resmi. Kebijakan dan kontak resmi perlu dilengkapi oleh pengelola sebelum layanan dipublikasikan.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="kicker">Bantuan layanan</p>
+      <h2>Pertanyaan yang sering diajukan</h2>
+      <p>Informasi singkat tentang pengajuan, lampiran, dan pelacakan aduan.</p>
+    </div>
+    <div class="help-grid">
+      <div class="faq-list">
+        <details>
+          <summary>Bagaimana cara mengirim aduan?</summary>
+          <p>Buat akun warga dan masuk terlebih dahulu. Pilih kategori, lalu isi judul, lokasi, dan deskripsi masalah sebelum mengirim.</p>
+        </details>
+        <details>
+          <summary>Apakah saya dapat menyertakan foto?</summary>
+          <p>Ya. Lampiran foto bersifat opsional dan menerima format JPG, PNG, atau WebP dengan ukuran maksimal 5 MB.</p>
+        </details>
+        <details>
+          <summary>Bagaimana cara melacak aduan?</summary>
+          <p>Simpan nomor tiket yang muncul setelah aduan berhasil dikirim, lalu masukkan nomor tersebut pada bagian “Lacak status aduan”.</p>
+        </details>
+        <details>
+          <summary>Apa arti status pada aduan?</summary>
+          <p>Diterima berarti laporan sudah masuk; diverifikasi berarti sedang diperiksa; diproses berarti sedang ditindaklanjuti; selesai berarti penanganan ditandai selesai; ditolak berarti laporan tidak dapat diproses.</p>
+        </details>
+        <details>
+          <summary>Siapa yang menangani aduan saya?</summary>
+          <p>Aduan diteruskan ke perangkat daerah sesuai kategori yang dipilih. Nama perangkat daerah dapat dilihat saat melacak tiket.</p>
+        </details>
+      </div>
+      <aside class="contact-card" id="bantuan">
+        <h3>Hubungi kami</h3>
+        <p>Informasi kontak resmi layanan belum tersedia. Untuk sementara, gunakan nomor tiket untuk memantau perkembangan aduan melalui halaman ini.</p>
+      </aside>
+    </div>
+  </div>
+</section>
+
 <footer>
   <div class="wrap foot-grid">
     <div>
@@ -278,11 +365,12 @@ $categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
         <a href="#kategori">Ajukan aduan</a>
         <a href="#" onclick="document.getElementById('nomorTiket').focus();return false;">Lacak tiket</a>
         <a href="#alur">Alur pengaduan</a>
+        <a href="#panduan">Panduan dan privasi</a>
       </div>
       <div>
         <h5>Bantuan</h5>
-        <a href="#" onclick="return false;">Pertanyaan umum</a>
-        <a href="#" onclick="return false;">Hubungi kami</a>
+        <a href="#faq">Pertanyaan umum</a>
+        <a href="#bantuan">Hubungi kami</a>
       </div>
     </div>
   </div>
@@ -318,6 +406,8 @@ $categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
       <textarea id="fDeskripsi" rows="3" placeholder="Jelaskan masalah yang anda temukan"></textarea>
     </div>
     
+    <p class="notice-note">Jangan sertakan kata sandi atau data pribadi yang tidak diperlukan. <a href="#privasi" onclick="closeModal('formOverlay')">Baca informasi privasi</a>.</p>
+
     <div class="field">
       <label for="fFoto">Foto Pendukung (Opsional)</label>
       <input type="file" id="fFoto" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
@@ -348,7 +438,7 @@ $categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
 
 <script>
   const KATEGORI = <?= json_encode($categories, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
-  const IS_WARGA = <?= json_encode($user && $user['peran'] === 'warga') ?>;
+  const USER_ROLE = <?= json_encode($user['peran'] ?? null) ?>;
   const CSRF_TOKEN = <?= json_encode(csrfToken()) ?>;
   const STATUS_PROGRESS = { diterima: 25, diverifikasi: 50, diproses: 75, selesai: 100, ditolak: 100 };
   const CATEGORY_ICONS = { jalan: 'ti-road', sampah: 'ti-trash', lampu: 'ti-bulb-off', banjir: 'ti-droplet', fasum: 'ti-building-community', lain: 'ti-dots' };
@@ -362,17 +452,50 @@ $categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
     const grid = document.getElementById('catGrid');
     if (!grid) return;
     grid.innerHTML = KATEGORI.map(k => `
-      <button type="button" class="cat-card" onclick="${IS_WARGA ? `openFormModal(${Number(k.id_kategori)})` : "window.location.href='login.php'"}">
+      <button type="button" class="cat-card" data-category-id="${Number(k.id_kategori)}">
         <div class="icon"><i class="ti ${CATEGORY_ICONS[k.kategori_key] || 'ti-message-circle'}" aria-hidden="true"></i></div>
         <h4>${escapeHtml(k.nama_kategori)}</h4>
         <p>${escapeHtml(k.nama_opd)}</p>
+        <span class="cat-action">${USER_ROLE === 'warga' ? 'Klik untuk membuat aduan' : 'Klik untuk melanjutkan'}</span>
       </button>
     `).join('');
+    if (!KATEGORI.length) {
+      grid.innerHTML = '<p class="empty-note">Kategori aduan belum tersedia. Silakan coba kembali nanti.</p>';
+      return;
+    }
+    grid.querySelectorAll('[data-category-id]').forEach(button => {
+      button.addEventListener('click', () => {
+        openFormModal(Number(button.dataset.categoryId));
+      });
+    });
+  }
+
+  function showCategoryNotice(message, categoryId = null) {
+    const notice = document.getElementById('categoryNotice');
+    notice.replaceChildren(document.createTextNode(message));
+
+    if (USER_ROLE === null && categoryId !== null) {
+      notice.append(document.createTextNode(' '));
+      const loginLink = document.createElement('a');
+      loginLink.href = `login.php?kategori=${categoryId}`;
+      loginLink.textContent = 'Masuk';
+      notice.append(loginLink, document.createTextNode(' atau '));
+      const registerLink = document.createElement('a');
+      registerLink.href = `register.php?kategori=${categoryId}`;
+      registerLink.textContent = 'buat akun warga';
+      notice.append(registerLink, document.createTextNode(' untuk melanjutkan.'));
+    }
+
+    notice.hidden = false;
   }
 
   function openFormModal(kategoriId) {
-    if (!IS_WARGA) {
-      window.location.href = 'login.php';
+    if (USER_ROLE !== 'warga') {
+      if (USER_ROLE === null) {
+        showCategoryNotice('Untuk mengirim aduan, Anda perlu masuk dengan akun warga.', kategoriId ?? null);
+      } else {
+        showCategoryNotice('Akun petugas tidak dapat mengirim aduan. Silakan masuk menggunakan akun warga.');
+      }
       return;
     }
     const overlay = document.getElementById('formOverlay');
@@ -508,6 +631,14 @@ $categories = $categoriesQuery ? $categoriesQuery->fetch_all(MYSQLI_ASSOC) : [];
 
   document.addEventListener('DOMContentLoaded', () => {
     renderCategories();
+    const categoryFromLink = Number(new URLSearchParams(window.location.search).get('kategori'));
+    if (categoryFromLink > 0) {
+      if (USER_ROLE === 'warga') {
+        openFormModal(categoryFromLink);
+      } else if (USER_ROLE !== null) {
+        showCategoryNotice('Akun petugas tidak dapat mengirim aduan. Silakan masuk menggunakan akun warga.');
+      }
+    }
     const ticketFromLink = new URLSearchParams(window.location.search).get('no_tiket');
     if (ticketFromLink) {
       document.getElementById('nomorTiket').value = ticketFromLink;

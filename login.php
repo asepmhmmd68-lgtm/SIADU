@@ -1,8 +1,17 @@
 <?php
 require __DIR__ . '/auth.php';
 
+$categoryId = filter_input(INPUT_GET, 'kategori', FILTER_VALIDATE_INT);
+$categoryId = $categoryId !== false && $categoryId !== null && $categoryId > 0 ? $categoryId : null;
+$categoryQuery = $categoryId !== null ? '?kategori=' . $categoryId : '';
+
 if (currentUser()) {
-    header('Location: index.php');
+    $user = currentUser();
+    if (in_array($user['peran'], ['petugas', 'admin'], true)) {
+        header('Location: admin.php');
+    } else {
+        header('Location: index.php' . $categoryQuery . ($categoryId !== null ? '#kategori' : ''));
+    }
     exit;
 }
 
@@ -25,7 +34,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 unset($user['kata_sandi']);
                 $_SESSION['user'] = $user;
                 $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-                header('Location: ' . (in_array($user['peran'], ['petugas', 'admin'], true) ? 'admin.php' : 'index.php'));
+                if (in_array($user['peran'], ['petugas', 'admin'], true)) {
+                    header('Location: admin.php');
+                } else {
+                    header('Location: index.php' . $categoryQuery . ($categoryId !== null ? '#kategori' : ''));
+                }
                 exit;
             }
             $error = 'Email atau kata sandi tidak sesuai.';
@@ -66,7 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <input id="kata_sandi" name="kata_sandi" type="password" autocomplete="current-password" required>
         <button type="submit">Masuk</button>
     </form>
-    <p>Belum punya akun warga? <a href="register.php">Daftar di sini</a>.</p>
+    <p>Belum punya akun warga? <a href="register.php<?= $categoryQuery ?>">Daftar di sini</a>.</p>
     <p><a href="index.php">Kembali ke beranda</a></p>
 </main>
 </body>

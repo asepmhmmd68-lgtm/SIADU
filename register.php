@@ -1,8 +1,17 @@
 <?php
 require __DIR__ . '/auth.php';
 
+$categoryId = filter_input(INPUT_GET, 'kategori', FILTER_VALIDATE_INT);
+$categoryId = $categoryId !== false && $categoryId !== null && $categoryId > 0 ? $categoryId : null;
+$categoryQuery = $categoryId !== null ? '?kategori=' . $categoryId : '';
+
 if (currentUser()) {
-    header('Location: index.php');
+    $user = currentUser();
+    if (in_array($user['peran'], ['petugas', 'admin'], true)) {
+        header('Location: admin.php');
+    } else {
+        header('Location: index.php' . $categoryQuery . ($categoryId !== null ? '#kategori' : ''));
+    }
     exit;
 }
 
@@ -28,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $conn->prepare("INSERT INTO pengguna (nama, email, kata_sandi, peran) VALUES (?, ?, ?, 'warga')");
             $stmt->bind_param('sss', $name, $email, $hash);
             $stmt->execute();
-            header('Location: login.php?daftar=berhasil');
+            header('Location: login.php?daftar=berhasil' . ($categoryId !== null ? '&kategori=' . $categoryId : ''));
             exit;
         } catch (mysqli_sql_exception $e) {
             if ((int)$e->getCode() === 1062) {
@@ -77,7 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <input id="konfirmasi_kata_sandi" name="konfirmasi_kata_sandi" type="password" autocomplete="new-password" required minlength="8">
         <button type="submit">Buat akun</button>
     </form>
-    <p>Sudah memiliki akun? <a href="login.php">Masuk</a>.</p>
+    <p>Sudah memiliki akun? <a href="login.php<?= $categoryQuery ?>">Masuk</a>.</p>
     <p><a href="index.php">Kembali ke beranda</a></p>
 </main>
 </body>

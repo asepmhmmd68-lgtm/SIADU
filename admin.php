@@ -27,13 +27,17 @@ if ($isAdmin) {
         ORDER BY o.nama_opd");
     $statusQuery = $conn->query("SELECT status, COUNT(*) AS jumlah
         FROM pengaduan GROUP BY status");
-    $listQuery = $conn->query("SELECT p.no_tiket, p.judul, p.lokasi, p.status, p.tgl_masuk,
+    $listQuery = $conn->query("SELECT p.id_pengaduan, p.no_tiket, p.judul, p.lokasi, p.status, p.tgl_masuk,
         k.nama_kategori, o.nama_opd, u.nama AS nama_pelapor
         FROM pengaduan p
         JOIN kategori k ON k.id_kategori = p.id_kategori
         JOIN perangkat_daerah o ON o.id_opd = p.id_opd
         LEFT JOIN pengguna u ON u.id_pengguna = p.id_pengguna
         ORDER BY p.tgl_masuk DESC");
+    $attachmentQuery = $conn->query("SELECT l.id_pengaduan, l.lokasi_berkas
+        FROM lampiran l
+        JOIN pengaduan p ON p.id_pengaduan = l.id_pengaduan
+        ORDER BY l.id_lampiran");
 } else {
     $statsStatement = $conn->prepare("SELECT COUNT(*) AS total,
         SUM(status = 'selesai') AS selesai,
@@ -61,7 +65,7 @@ if ($isAdmin) {
     $statusStatement->execute();
     $statusQuery = $statusStatement->get_result();
 
-    $listStatement = $conn->prepare("SELECT p.no_tiket, p.judul, p.lokasi, p.status, p.tgl_masuk,
+    $listStatement = $conn->prepare("SELECT p.id_pengaduan, p.no_tiket, p.judul, p.lokasi, p.status, p.tgl_masuk,
         k.nama_kategori, o.nama_opd, u.nama AS nama_pelapor
         FROM pengaduan p
         JOIN kategori k ON k.id_kategori = p.id_kategori
@@ -71,6 +75,15 @@ if ($isAdmin) {
     $listStatement->bind_param('i', $opdId);
     $listStatement->execute();
     $listQuery = $listStatement->get_result();
+
+    $attachmentStatement = $conn->prepare("SELECT l.id_pengaduan, l.lokasi_berkas
+        FROM lampiran l
+        JOIN pengaduan p ON p.id_pengaduan = l.id_pengaduan
+        WHERE p.id_opd = ?
+        ORDER BY l.id_lampiran");
+    $attachmentStatement->bind_param('i', $opdId);
+    $attachmentStatement->execute();
+    $attachmentQuery = $attachmentStatement->get_result();
 }
 $stats = $statsQuery->fetch_assoc() ?: ['total' => 0, 'selesai' => 0, 'diproses' => 0];
 $opdProgress = $progressQuery->fetch_all(MYSQLI_ASSOC);
@@ -82,6 +95,10 @@ while ($statusRow = $statusQuery->fetch_assoc()) {
 }
 $maxStatusCount = max(1, max($statusCounts));
 $complaints = $listQuery->fetch_all(MYSQLI_ASSOC);
+$attachmentsByComplaint = [];
+while ($attachment = $attachmentQuery->fetch_assoc()) {
+    $attachmentsByComplaint[(int)$attachment['id_pengaduan']][] = $attachment['lokasi_berkas'];
+}
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -131,6 +148,8 @@ $complaints = $listQuery->fetch_all(MYSQLI_ASSOC);
         .legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px;color:var(--muted);font-size:12px}
         .legend span{display:inline-flex;align-items:center;gap:5px}.legend i{width:9px;height:9px;border-radius:50%;background:#3978b8}
         .legend .selesai i{background:#2f9b68}.legend .ditolak i{background:#d45a52}
+        .attachment-list{display:flex;flex-wrap:wrap;gap:8px}.attachment-preview{display:block}
+        .attachment-preview img{display:block;width:72px;height:72px;object-fit:cover;border:1px solid var(--border);border-radius:6px}
         @media(max-width:760px){.charts{grid-template-columns:1fr}}
         @media(max-width:650px){header{align-items:flex-start;gap:12px}.stats{grid-template-columns:1fr}}
     </style>
@@ -226,16 +245,30 @@ $complaints = $listQuery->fetch_all(MYSQLI_ASSOC);
     <div class="table-wrap">
         <table>
             <thead><tr>
-                <th>Tiket / pelapor</th><th>Aduan</th><th>OPD</th><th>Status</th><th>Masuk</th><th>Perbarui status</th>
+                <th>Tiket / pelapor</th><th>Aduan</th><th>OPD</th><th>Lampiran</th><th>Status</th><th>Masuk</th><th>Perbarui status</th>
             </tr></thead>
             <tbody>
             <?php if (!$complaints): ?>
-                <tr><td colspan="6">Belum ada aduan untuk ditampilkan.</td></tr>
+                <tr><td colspan="7">Belum ada aduan untuk ditampilkan.</td></tr>
             <?php else: foreach ($complaints as $complaint): ?>
                 <tr>
                     <td><strong><?= escapeHtml($complaint['no_tiket']) ?></strong><small><?= escapeHtml($complaint['nama_pelapor'] ?? 'Akun lama') ?></small></td>
                     <td><strong><?= escapeHtml($complaint['judul']) ?></strong><small><?= escapeHtml($complaint['nama_kategori']) ?> · <?= escapeHtml($complaint['lokasi']) ?></small></td>
                     <td><?= escapeHtml($complaint['nama_opd']) ?></td>
+                    <td>
+                        <?php $attachments = $attachmentsByComplaint[(int)$complaint['id_pengaduan']] ?? []; ?>
+                        <?php if ($attachments): ?>
+                            <div class="attachment-list">
+                                <?php foreach ($attachments as $attachmentPath): ?>
+                                    <a class="attachment-preview" href="<?= escapeHtml($attachmentPath) ?>" target="_blank" rel="noopener" aria-label="Buka lampiran gambar">
+                                        <img src="<?= escapeHtml($attachmentPath) ?>" alt="Lampiran aduan <?= escapeHtml($complaint['no_tiket']) ?>" loading="lazy">
+                                    </a>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php else: ?>
+                            <small>Tidak ada lampiran</small>
+                        <?php endif; ?>
+                    </td>
                     <td><?= escapeHtml($statusLabels[$complaint['status']] ?? $complaint['status']) ?></td>
                     <td><?= escapeHtml($complaint['tgl_masuk']) ?></td>
                     <td>
